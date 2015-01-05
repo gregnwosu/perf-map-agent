@@ -31,6 +31,8 @@
 
 FILE *method_file = NULL;
 int unfold_inlined_methods = 0;
+int print_method_signatures = 0;
+int clean_class_names = 0;
 
 void open_map_file() {
     if (!method_file)
@@ -49,6 +51,21 @@ static int get_line_number(jvmtiLineNumberEntry *table, jint entry_count, jlocat
   return -1;
 }
 
+void class_name_from_sig(char *dest, size_t dest_size, const char *sig) {
+    if (clean_class_names && sig[0] == 'L') {
+        char *src = sig + 1;
+        int i;
+        for(i = 0; i < (dest_size - 1) && src[i]; i++) {
+            char c = src[i];
+            if (c == '/') c = '.';
+            if (c == ';') c = 0;
+            dest[i] = c;
+        }
+        dest[i] = 0;
+    } else
+        strncpy(dest, sig, dest_size);
+}
+
 static void sig_string(jvmtiEnv *jvmti, jmethodID method, char *output, size_t noutput) {
     char *name;
     char *msig;
@@ -59,7 +76,13 @@ static void sig_string(jvmtiEnv *jvmti, jmethodID method, char *output, size_t n
     (*jvmti)->GetMethodDeclaringClass(jvmti, method, &class);
     (*jvmti)->GetClassSignature(jvmti, class, &csig, NULL);
 
-    snprintf(output, noutput, "%s.%s%s", csig, name, msig);
+    char class_name[1000];
+    class_name_from_sig(class_name, sizeof(class_name), csig);
+
+    if (print_method_signatures)
+        snprintf(output, noutput, "%s.%s%s", class_name, name, msig);
+    else
+        snprintf(output, noutput, "%s.%s", class_name, name);
 
     (*jvmti)->Deallocate(jvmti, name);
     (*jvmti)->Deallocate(jvmti, msig);
@@ -182,6 +205,8 @@ Agent_OnAttach(JavaVM *vm, char *options, void *reserved) {
     open_map_file();
 
     unfold_inlined_methods = strstr(options, "unfold") != NULL;
+    print_method_signatures = strstr(options, "msig") != NULL;
+    clean_class_names = strstr(options, "dottedclass") != NULL;
 
     jvmtiEnv *jvmti;
     (*vm)->GetEnv(vm, (void **)&jvmti, JVMTI_VERSION_1);
